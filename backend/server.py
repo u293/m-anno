@@ -22,14 +22,21 @@ if 'AyahKey' not in df_verses.columns:
 # manus_id_name_mapper = {0: "Konduga"}
 
 annotations = {}
-annotations["Konduga"] = pd.read_excel("Dataset-Verse-by-Verse1-Konduga.xlsx").astype(str)
-annotations["Konduga"] = annotations["Konduga"].replace('nan','',regex=True)
-if "annotation_id" not in annotations["Konduga"].columns:
-    annotations["Konduga"].insert(0, 'annotation_id', range(0, len(annotations["Konduga"])))
-annotations["Konduga"] = annotations["Konduga"].rename(columns={"annotation_aya": "verse_id",
-                                                                "annotation_Konduga": "annotation",
-                                                                "annotation_transliteration": "annotation_transliteration",
-                                                                })
+m_id = "Konduga"
+annotations[m_id] = pd.read_excel("Konduga.xlsx").astype(str)
+annotations[m_id] = annotations[m_id].replace('nan','',regex=True)
+annotations[m_id] = annotations[m_id].fillna('')
+if "annotation_id" not in annotations[m_id].columns:
+    annotations[m_id].insert(0, 'annotation_id', range(0, len(annotations[m_id])))
+# ------
+m_id = "Muenster"
+annotations[m_id] = pd.read_excel("Muenster.xlsx").astype(str)
+annotations[m_id] = annotations[m_id].replace('nan','',regex=True)
+annotations[m_id] = annotations[m_id].fillna('')
+if "annotation_id" not in annotations[m_id].columns:
+    annotations[m_id].insert(0, 'annotation_id', range(0, len(annotations[m_id])))
+
+
 # print(annotations[0].columns)
 
 # print(annotations["Konduga"])
@@ -116,7 +123,7 @@ def save_annotation():
     data['annotation_id'] = f"{len(annotations[manus_id])}"
     df_dictionary = pd.DataFrame([data])
     annotations[manus_id] = pd.concat([annotations[manus_id], df_dictionary], ignore_index=True)
-    annotations[manus_id].to_excel('Dataset-Verse-by-Verse1-Konduga.xlsx', index=False)
+    annotations[manus_id].to_excel(f'{manus_id}.xlsx', index=False)
     return jsonify({"message": "Annotation saved successfully"}), 200
 
 

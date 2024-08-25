@@ -492,6 +492,7 @@ const App: React.FC = () => {
                                                     >
                                                         <strong>Annotated
                                                             Object:</strong> {annotation.annotated_object}<br/>
+                                                        <strong>Verse Key:</strong> {annotation.verse_id}<br/>
                                                         <strong>Annotation:</strong> {annotation.annotation}<br/>
                                                         <strong>Annotation
                                                             Range:</strong> {annotation.annotated_range}<br/>
