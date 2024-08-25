@@ -1,55 +1,100 @@
-import React, {ReactNode, useState} from 'react';
+import React, {ReactNode, useEffect, useRef, useState} from 'react';
 import axios from 'axios';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import Autocomplete from 'react-autocomplete';
 import './App.css';
 
-interface Verse {
-    AyahKey: number;
-    SrNo: number;
-    Juz: number;
-    JuzNameArabic: string;
-    JuzNameEnglish: string;
-    SurahNo: number;
-    SurahNameArabic: string;
-    SurahNameEnglish: string;
-    SurahMeaning: string;
-    WebLink: string;
-    Classification: string;
-    AyahNo: number;
-    EnglishTranslation: string;
-    OrignalArabicText: string;
-    ArabicText: string;
-    ArabicWordCount: number;
-    ArabicLetterCount: number;
-}
-
-interface Annotation {
-    annotation_id: number;
-    verse_id: string;
-    annotation: string;
-    annotated_object: string;
-    annotation_type: string;
-}
-
-interface AnnotationResult {
-    manuscript_name: string;
-    manuscript_id: string;
-    annotations: Annotation[];
-}
+const ContextMenu= ({x, y, onClose, onAnnotate}) => {
+    return (
+        <div style={{
+            position: 'fixed',
+            top: y,
+            left: x,
+            background: 'white',
+            border: '1px solid black',
+            padding: '5px',
+            zIndex: 1000
+        }}>
+            <div onClick={() => {
+            }}>
+                Add
+            </div>
+        </div>
+    );
+};
 
 
-const App: React.FC = () => {
+const Verse= ({verse}) => {
+    const [selectedText, setSelectedText] = useState<string>('');
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const handleTextSelect = () => {
+        const selection = window.getSelection();
+        if (selection && selection.toString()) {
+            setSelectedText(selection.toString());
+        } else {
+            setSelectedText('');
+            setContextMenu(null);
+        }
+    };
+
+    const handleContextMenu = (event: React.MouseEvent) => {
+        event.preventDefault();
+        if (selectedText) {
+            setContextMenu({x: event.clientX, y: event.clientY});
+        }
+    };
+
+    const handleAddAnnotation = (annotation) => {
+        console.log('Annotation added for:', selectedText, 'Type:');
+        setContextMenu(null);
+    };
+
+    const handleCloseContextMenu = () => {
+        setContextMenu(null);
+    };
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setContextMenu(null);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
+
+    return (<div className="alert alert-info" role="alert" ref={containerRef} onMouseUp={handleTextSelect}
+                 onContextMenu={handleContextMenu}>
+        <h4 className="alert-heading">{verse.OrignalArabicText}</h4>
+        {/*<p>{this.props.verse.EnglishTranslation}</p>*/}
+        {contextMenu && (
+            <ContextMenu
+                x={contextMenu.x}
+                y={contextMenu.y}
+                onClose={handleCloseContextMenu}
+                onAnnotate={handleAddAnnotation}
+            />
+        )}
+    </div>);
+};
+
+const App= () => {
     const [query, setQuery] = useState<string>('');
-    const [selectedVerse, setSelectedVerse] = useState<Verse | null>(null);
-    const [autocompleteResults, setAutocompleteResults] = useState<Verse[]>([]);
-    const [annotationResults, setAnnotationResults] = useState<AnnotationResult[]>([]);
+    const [selectedVerse, setSelectedVerse] = useState(null);
+    const [autocompleteResults, setAutocompleteResults] = useState([]);
+    const [annotationResults, setAnnotationResults] = useState([]);
 
-    const handleSelectVerse = async (item: Verse) => {
+    const handleSelectVerse = async (item) => {
         setSelectedVerse(item);
         setQuery(item.ArabicText);
         setAutocompleteResults([]); // Clear the autocomplete results
-        const response = await axios.get<AnnotationResult[]>(`http://localhost:5000/get_annotations?query=${item.AyahKey}`);
+        const response = await axios.get(`http://localhost:5000/get_annotations?query=${item.AyahKey}`);
         setAnnotationResults(response.data.map((item) => item));
     };
 
@@ -57,7 +102,7 @@ const App: React.FC = () => {
         const value = e.target.value;
         setQuery(value);
         if (value.length >= 3) {
-            const response = await axios.get<Verse[]>(`http://localhost:5000/search_verse?query=${value}`);
+            const response = await axios.get(`http://localhost:5000/search_verse?query=${value}`);
             setAutocompleteResults(response.data.map((item) => item));
         } else {
             setAutocompleteResults([]);
@@ -94,10 +139,7 @@ const App: React.FC = () => {
                 </div>
             </form>
             {selectedVerse && (
-                <div className="alert alert-info" role="alert">
-                    <h4 className="alert-heading">{selectedVerse.OrignalArabicText}</h4>
-                    <p>{selectedVerse.EnglishTranslation}</p>
-                </div>
+                <Verse verse={selectedVerse}/>
             )}
             <div className="accordion" id="resultsAccordion" style={{paddingBottom: '10rem'}}>
                 {annotationResults.map((result) => {
@@ -146,8 +188,6 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-
-
                         </div>
                     )
                 })}
