@@ -77,3 +77,45 @@
 .list-group-item {
   text-align: left;
 }
+.popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.popup-content {
+  background-color: white;
+  border-radius: 5px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1em;
+}
+
+/* Additional styles to enhance the form appearance */
+.popup-content h2 {
+  margin-bottom: 20px;
+}
+
+.form-group {
+  display:grid;
+  grid-template-columns: max-content max-content;
+  grid-gap:5px;
+  padding: 0.5em;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+}
+.manuscript-selection{
+  padding-bottom: 0.5em;
+}
