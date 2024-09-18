@@ -9,7 +9,6 @@ import re
 app = Flask(__name__)
 CORS(app)
 
-
 # def remove_tashkeel(text):
 #     tashkeel_pattern = r'[\u0617-\u061A\u064B-\u0652]'
 #     # This will replace all Hamza Alef variations with a normal Alef (ا)
@@ -18,6 +17,7 @@ CORS(app)
 #     b = re.sub(hamza_alef_pattern, 'ا', a)
 #     return b
 chars_to_normalize = set()
+
 
 def normalize_arabic_text(text):
     # http://www.isthisthingon.org/unicode/index.phtml?page=U0&subpage=6
@@ -70,7 +70,7 @@ def normalize_arabic_text(text):
 # df_verses = pd.read_excel('Dataset-Verse-by-Verse.xlsx')
 # if 'AyahKey' not in df_verses.columns:
 #     df_verses['AyahKey'] = df_verses['SurahNo'].astype(str) + ":" + df_verses['AyahNo'].astype(str)
-df_verses = pd.read_excel('warshData_v2-1.xlsx', dtype=str)
+df_verses = pd.read_excel('warshData_v2-1-searchable.xlsx', dtype=str)
 # id	jozz	page	sura_no	sura_name_en	sura_name_ar	line_start	line_end	aya_no	aya_text
 if 'AyahKey' not in df_verses.columns:
     df_verses['AyahKey'] = df_verses['sura_no'].astype(str) + ":" + df_verses['aya_no'].astype(str)
@@ -78,33 +78,31 @@ if "searchable_text" not in df_verses.columns:
     df_verses["searchable_text"] = df_verses["aya_text"].apply(normalize_arabic_text)
     df_verses.to_excel(f'warshData_v2-1-searchable.xlsx', index=False)
 
-df = pd.DataFrame(chars_to_normalize, columns=['chars_to_normalize'])
-output_file = 'chars_to_normalize.xlsx'
-df.to_excel(output_file, index=False)
-
+    df = pd.DataFrame(chars_to_normalize, columns=['chars_to_normalize'])
+    output_file = 'chars_to_normalize.xlsx'
+    df.to_excel(output_file, index=False)
 
 resources_directory = "./resources"
 
+all_manuscripts = ["Konduga", "Muenster", "2ShK", "3ImI", "4MM", "Tahir Kano", "Kaduna-AR20", "Kaduna-AR33", "YM",
+                   "Mutai", "BNF Arabe", "Gashi", "Zinder"]
 annotations = {}
-m_id = "Konduga"
-annotations[m_id] = pd.read_excel(os.path.join(resources_directory, "Konduga.xlsx")).astype(str)
-annotations[m_id] = annotations[m_id].replace('nan', '', regex=True)
-annotations[m_id] = annotations[m_id].fillna('')
-annotations[m_id]['manuscript_id'] = m_id
-if "annotation_id" not in annotations[m_id].columns:
-    annotations[m_id].insert(0, 'annotation_id', range(0, len(annotations[m_id])))
-if "flag" not in annotations[m_id].columns:
-    annotations[m_id]['flag'] = False
-# ----------------------------------------------------------------------------------------------
-m_id = "Muenster"
-annotations[m_id] = pd.read_excel(os.path.join(resources_directory, "Muenster.xlsx")).astype(str)
-annotations[m_id] = annotations[m_id].replace('nan', '', regex=True)
-annotations[m_id] = annotations[m_id].fillna('')
-annotations[m_id]['manuscript_id'] = m_id
-if "annotation_id" not in annotations[m_id].columns:
-    annotations[m_id].insert(0, 'annotation_id', range(0, len(annotations[m_id])))
-if "flag" not in annotations[m_id].columns:
-    annotations[m_id]['flag'] = False
+for m_id in all_manuscripts:
+    if os.path.exists(os.path.join(resources_directory, f"{m_id}.xlsx")):
+        annotations[m_id] = pd.read_excel(os.path.join(resources_directory, f"{m_id}.xlsx")).astype(str)
+        annotations[m_id] = annotations[m_id].replace('nan', '', regex=True)
+        annotations[m_id] = annotations[m_id].fillna('')
+        annotations[m_id]['manuscript_id'] = m_id
+        if "annotation_id" not in annotations[m_id].columns:
+            annotations[m_id].insert(0, 'annotation_id', range(0, len(annotations[m_id])))
+        if "flag" not in annotations[m_id].columns:
+            annotations[m_id]['flag'] = False
+    else:
+        annotations[m_id] = pd.DataFrame(columns=["annotation_id", "verse_id", "annotated_object", "annotation",
+                                                  "annotation_Language", "annotation_transliteration",
+                                                  "annotation_type", "other", "manuscript_id", "annotated_range", "flag"
+                                                  ])
+        annotations[m_id].to_excel(os.path.join(resources_directory, f'{m_id}.xlsx'), index=False)
 
 
 def starts_with_arabic(text):
@@ -127,6 +125,7 @@ def search():
 
     return jsonify(results)
 
+
 @app.route('/selectNextVerse', methods=['GET'])
 def selectNextVerse():
     query = request.args.get('current', '')
@@ -147,6 +146,7 @@ def selectNextVerse():
 
     return jsonify(results)
 
+
 @app.route('/selectPreviousVerse', methods=['GET'])
 def selectPreviousVerse():
     query = request.args.get('current', '')
@@ -163,7 +163,7 @@ def selectPreviousVerse():
         return jsonify(None)
     else:
         # Return the previous row
-        results =  df_verses.iloc[target_index - 1].to_dict()
+        results = df_verses.iloc[target_index - 1].to_dict()
 
     return jsonify(results)
 
@@ -176,6 +176,7 @@ def get_annotations():
     for manuscript_id, annotations_list in annotations.items():
         annotations_list = annotations_list.to_dict(orient='records')
         manuscript_annotations = [a for a in annotations_list if a['verse_id'] == query]
+
         results.append({
             'manuscript_name': f"Manuscript {manuscript_id}",
             'manuscript_id': manuscript_id,
