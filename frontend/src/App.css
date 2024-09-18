@@ -119,3 +119,31 @@
 .manuscript-selection{
   padding-bottom: 0.5em;
 }
+.annotation-item {
+  position: relative;
+  padding-top: 20px; /* Add some top padding to accommodate the flag */
+}
+
+.flag-indicator {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  font-size: 1.2em; /* Adjust size as needed */
+}
+/* Make the table smaller */
+.small-table {
+  font-size: 0.95rem; /* Smaller font */
+}
+
+.small-table th, .small-table td {
+  padding: 0.1rem 0.1rem; /* Smaller padding */
+}
+
+/* Alternating row colors (zebra stripes) */
+.small-table tbody tr:nth-child(odd) {
+  background-color: #f9f9f9 !important; /* Light gray for odd rows */
+}
+
+.small-table tbody tr:nth-child(even) {
+  background-color: #ffffff !important; /* White for even rows */
+}
