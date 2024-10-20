@@ -89,7 +89,19 @@ all_manuscripts = ["Konduga", "Muenster", "2ShK", "3ImI", "4MM", "Tahir Kano", "
 annotations = {}
 for m_id in all_manuscripts:
     if os.path.exists(os.path.join(resources_directory, f"{m_id}.xlsx")):
-        annotations[m_id] = pd.read_excel(os.path.join(resources_directory, f"{m_id}.xlsx")).astype(str)
+        annotations[m_id] = pd.read_excel(os.path.join(resources_directory, f"{m_id}.xlsx"), dtype={
+            "annotation_id": str,
+            "verse_id": str,
+            "annotated_object": str,
+            "annotation": str,
+            "annotation_Language": str,
+            "annotation_transliteration": str,
+            "annotation_type": str,
+            "other": str,
+            "manuscript_id": str,
+            "annotated_range": str,
+            "flag": bool,
+        })
         annotations[m_id] = annotations[m_id].replace('nan', '', regex=True)
         annotations[m_id] = annotations[m_id].fillna('')
         annotations[m_id]['manuscript_id'] = m_id
@@ -97,6 +109,7 @@ for m_id in all_manuscripts:
             annotations[m_id].insert(0, 'annotation_id', range(0, len(annotations[m_id])))
         if "flag" not in annotations[m_id].columns:
             annotations[m_id]['flag'] = False
+
     else:
         annotations[m_id] = pd.DataFrame(columns=["annotation_id", "verse_id", "annotated_object", "annotation",
                                                   "annotation_Language", "annotation_transliteration",
