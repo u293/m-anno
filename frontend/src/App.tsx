@@ -22,7 +22,7 @@ const App: React.FC = () => {
                         <NavLink className="navbar-brand" to="/">Quranic Annotations</NavLink>
                         <div className="navbar-nav">
                             <NavLink className="nav-item nav-link" to="/" end>
-                                Home
+                                Annotation Mode
                             </NavLink>
                             <NavLink className="nav-item nav-link" to="/search-and-filters">
                                 Search and Filters
