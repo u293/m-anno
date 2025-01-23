@@ -34,6 +34,7 @@ export interface Verse {
 }
 
 export interface Annotation {
+    // [key: string]: string | boolean;
     annotation_id: string;
     manuscript_id: string;
     verse_id: string;

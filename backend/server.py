@@ -276,5 +276,117 @@ def update_annotation():
         return jsonify({"error": f"{e}"}), 500
 
 
+@app.route('/save_annotations', methods=['POST'])
+def save_annotations():
+    updatedAndDeleted = request.json
+    for data in updatedAndDeleted['updatedRows']:
+        keys = []
+        values = []
+        for k, v in data.items():
+            keys.append(k)
+            values.append(v)
+        manus_id = data["manuscript_id"]
+        annotations[manus_id].loc[annotations[manus_id]['annotation_id'] == data['annotation_id'], keys] = values
+        annotations[manus_id].to_excel(os.path.join(resources_directory, f'{manus_id}.xlsx'), index=False)
+
+    for data in updatedAndDeleted['deletedRows']:
+        a_id = data['annotation_id']
+        m_id = data['manuscript_id']
+        annotations[m_id] = annotations[m_id][annotations[m_id]['annotation_id'] != a_id]
+        annotations[m_id].to_excel(os.path.join(resources_directory, f'{m_id}.xlsx'), index=False)
+
+    return {'message': 'Annotations updated successfully'}, 200
+
+
+@app.route('/filter_annotations', methods=['POST'])
+def filter_annotations():
+    filters = request.json
+    filters_updated = filters.copy()
+    for filter_key, filter in filters.items():
+        if "value" in filter and filter['value'] == "" or "value" not in filter:
+            del filters_updated[filter_key]
+
+    filters = filters_updated
+    if not filters:
+        return jsonify({'error': 'No filters provided'}), 400
+
+    # A list to hold the filtered annotations
+    filtered_annotations = []
+
+    for manuscript_id, annotations_list in annotations.items():
+        # Convert the DataFrame of annotations to a list of dictionaries
+        annotations_data = annotations_list.to_dict(orient='records')
+
+        # Filter the annotations for this manuscript based on the provided filters
+        for annotation in annotations_data:
+            # Check each filter condition
+            match = True
+            for key, filter_data in filters.items():
+                if key not in annotation:
+                    match = False
+                    break
+
+                # Extract value and match type (optional)
+                value = filter_data.get('value', '')
+                match_type = filter_data.get('matchType', 'full')  # Default to 'partial'
+
+                # Handle `flag` and `Id` filters (exact match only)
+                if key in ['flag', 'annotation_id', 'manuscript_id', 'verse_id']:
+                    # If `value` is a boolean or ID, perform exact match
+                    if str(annotation[key]).lower() != str(value).lower():
+                        match = False
+                        break
+                else:
+                    # Handle string-based filters (full or partial match)
+                    if isinstance(value, str) and value != "":
+                        if match_type == 'full':
+                            # Perform a full case-insensitive match
+                            if str(annotation[key]).lower() != str(value).lower():
+                                match = False
+                                break
+                        elif match_type == 'partial':
+                            # Perform a partial case-insensitive match
+                            if str(value).lower() not in str(annotation[key]).lower():
+                                match = False
+                                break
+
+            # Add to the filtered list if all conditions match
+            if match:
+                filtered_annotations.append(annotation)
+
+    return jsonify(filtered_annotations)
+
+
+
+    # # Get the filter criteria from the request body
+    # filters = request.json
+    #
+    # if not filters:
+    #     return jsonify({'error': 'No filters provided'}), 400
+    #
+    # filtered_results = []
+    # for manuscript_id, annotations_list in annotations.items():
+    #     annotations_list = annotations_list.to_dict(orient='records')  # Convert DataFrame to list of dicts
+    #     manuscript_filtered = annotations_list
+    #
+    #     # Apply each filter condition dynamically
+    #     for key, value in filters.items():
+    #         if value is not None and value != '':
+    #             if key == 'flag':  # Special handling for boolean values
+    #                 manuscript_filtered = [a for a in manuscript_filtered if a.get(key) == (value is True or value == 'true')]
+    #             else:
+    #                 manuscript_filtered = [a for a in manuscript_filtered if str(a.get(key, '')).lower() == str(value).lower()]
+    #
+    #     # Add the filtered annotations for the current manuscript
+    #     if manuscript_filtered:
+    #         filtered_results.append({
+    #             'manuscript_name': f"Manuscript {manuscript_id}",
+    #             'manuscript_id': manuscript_id,
+    #             'annotations': manuscript_filtered
+    #         })
+    #
+    # return jsonify(filtered_results)
+
+
 if __name__ == '__main__':
     app.run(debug=True)

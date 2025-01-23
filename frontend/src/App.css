@@ -147,3 +147,31 @@
 .small-table tbody tr:nth-child(even) {
   background-color: #ffffff !important; /* White for even rows */
 }
+.updated-cell {
+  background-color: #ffffcc !important; /* Light yellow */
+  font-weight: bold;
+}
+.handsontable {
+  font-family: 'uthmanic_warsh_v21', sans-serif !important;
+}
+.badge-sm {
+  font-size: 0.7em;
+  min-width: 1.8em;
+  padding: .15em !important;
+  margin-left: .1em;
+  margin-right: .1em;
+  color: white !important;
+  cursor: pointer;
+}
+.deleted-row {
+  background-color: rgba(255, 0, 0, 0.1) !important; /* Light red background */
+  text-decoration: line-through; /* Strike-through text */
+  color: #ff0000; /* Red text color */
+
+}
+.filterbox{
+  margin: 2px;
+  width: 100%;
+  border: 1px solid #c3c1c1;
+  border-radius: 5px;
+}
