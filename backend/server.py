@@ -386,7 +386,250 @@ def filter_annotations():
     #         })
     #
     # return jsonify(filtered_results)
+# Add these functions to your existing Flask server code
 
+# Global dictionary to store templates in memory
+saved_templates = {}
+
+def load_saved_templates():
+    """Load all saved templates from Excel files into memory"""
+    global saved_templates
+    for manuscript_id in all_manuscripts:
+        template_file = os.path.join(resources_directory, f"{manuscript_id}_saved_templates.xlsx")
+        if os.path.exists(template_file):
+            try:
+                saved_templates[manuscript_id] = pd.read_excel(template_file, dtype={
+                    "template_id": str,
+                    "annotation": str,
+                    "annotation_Language": str,
+                    "annotation_transliteration": str,
+                    "annotation_type": str,
+                    "other": str,
+                    "created_date": str
+                })
+                saved_templates[manuscript_id] = saved_templates[manuscript_id].fillna('')
+            except Exception as e:
+                print(f"Error loading templates for {manuscript_id}: {e}")
+                saved_templates[manuscript_id] = pd.DataFrame(columns=[
+                    "template_id", "annotation", "annotation_Language",
+                    "annotation_transliteration", "annotation_type", "other", "created_date"
+                ])
+        else:
+            # Create empty template DataFrame
+            saved_templates[manuscript_id] = pd.DataFrame(columns=[
+                "template_id", "annotation", "annotation_Language",
+                "annotation_transliteration", "annotation_type", "other", "created_date"
+            ])
+
+# Load templates when server starts
+load_saved_templates()
+
+@app.route('/get_attribute_suggestions', methods=['GET'])
+def get_attribute_suggestions():
+    manuscript_id = request.args.get('manuscript', '')
+    field = request.args.get('field', '')
+    query = request.args.get('query', '')
+
+    if not manuscript_id or not field or not query:
+        return jsonify([])
+
+    if manuscript_id not in annotations:
+        return jsonify([])
+
+    try:
+        # Get all unique values for the specified field from the manuscript
+        field_values = annotations[manuscript_id][field].dropna().astype(str)
+        field_values = field_values[field_values != ''].unique()
+
+        # Filter values that contain the query (case-insensitive)
+        suggestions = [
+            value for value in field_values
+            if query.lower() in value.lower()
+        ]
+
+        # Sort by relevance (exact matches first, then starts with, then contains)
+        def sort_key(item):
+            item_lower = item.lower()
+            query_lower = query.lower()
+            if item_lower == query_lower:
+                return (0, item)  # Exact match
+            elif item_lower.startswith(query_lower):
+                return (1, item)  # Starts with
+            else:
+                return (2, item)  # Contains
+
+        suggestions.sort(key=sort_key)
+
+        # Limit to top 10 suggestions
+        return jsonify(suggestions[:10])
+
+    except Exception as e:
+        print(f"Error in get_attribute_suggestions: {e}")
+        return jsonify([])
+
+
+@app.route('/get_template_suggestions', methods=['GET'])
+def get_template_suggestions():
+    manuscript_id = request.args.get('manuscript', '')
+    query = request.args.get('query', '')
+
+    if not manuscript_id or not query:
+        return jsonify([])
+
+    if manuscript_id not in saved_templates:
+        return jsonify([])
+
+    try:
+        # Template fields
+        template_fields = ['annotation', 'annotation_Language', 'annotation_transliteration', 'annotation_type', 'other']
+
+        # Get saved templates for the manuscript
+        templates_data = saved_templates[manuscript_id]
+
+        if templates_data.empty:
+            return jsonify([])
+
+        # Create template suggestions
+        suggestions = []
+        for _, row in templates_data.iterrows():
+            # Create display text in format: "annotation-language-transliteration-type-other"
+            display_parts = []
+            for field in template_fields:
+                value = str(row[field]).strip() if pd.notna(row[field]) else ''
+                if value and value != 'nan':
+                    # Truncate long values for display
+                    if len(value) > 20:
+                        value = value[:17] + "..."
+                    display_parts.append(value)
+                else:
+                    display_parts.append('')
+
+            display_text = '-'.join(display_parts)
+
+            # Check if query matches any part of the display text (case-insensitive)
+            if query.lower() in display_text.lower():
+                template = {
+                    'id': str(row.get('template_id', len(suggestions))),
+                    'annotation': str(row['annotation']) if pd.notna(row['annotation']) else '',
+                    'annotation_Language': str(row['annotation_Language']) if pd.notna(row['annotation_Language']) else '',
+                    'annotation_transliteration': str(row['annotation_transliteration']) if pd.notna(row['annotation_transliteration']) else '',
+                    'annotation_type': str(row['annotation_type']) if pd.notna(row['annotation_type']) else '',
+                    'other': str(row['other']) if pd.notna(row['other']) else '',
+                    'displayText': display_text
+                }
+                suggestions.append(template)
+
+        # Remove duplicates based on the combination of all template fields
+        seen_combinations = set()
+        unique_suggestions = []
+
+        for suggestion in suggestions:
+            combination = (
+                suggestion['annotation'],
+                suggestion['annotation_Language'],
+                suggestion['annotation_transliteration'],
+                suggestion['annotation_type'],
+                suggestion['other']
+            )
+            if combination not in seen_combinations:
+                seen_combinations.add(combination)
+                unique_suggestions.append(suggestion)
+
+        # Sort by relevance (better matches first)
+        def sort_key(item):
+            display_lower = item['displayText'].lower()
+            query_lower = query.lower()
+            if query_lower in display_lower:
+                # Prioritize matches at the beginning
+                index = display_lower.find(query_lower)
+                return (index, item['displayText'])
+            return (999, item['displayText'])
+
+        unique_suggestions.sort(key=sort_key)
+
+        # Limit to top 8 suggestions to avoid overwhelming the UI
+        return jsonify(unique_suggestions[:8])
+
+    except Exception as e:
+        print(f"Error in get_template_suggestions: {e}")
+        return jsonify([])
+
+
+@app.route('/save_template', methods=['POST'])
+def save_template():
+    try:
+        data = request.json
+        manuscript_id = data.get('manuscript_id', '')
+
+        if not manuscript_id:
+            return jsonify({"error": "Manuscript ID is required"}), 400
+
+        if manuscript_id not in all_manuscripts:
+            return jsonify({"error": "Invalid manuscript ID"}), 400
+
+        # Template fields to save
+        template_fields = ['annotation', 'annotation_Language', 'annotation_transliteration', 'annotation_type', 'other']
+
+        # Validate that at least one field has content
+        has_content = any(data.get(field, '').strip() for field in template_fields)
+        if not has_content:
+            return jsonify({"error": "Template must have at least one non-empty field"}), 400
+
+        # Initialize templates for manuscript if not exists
+        if manuscript_id not in saved_templates:
+            saved_templates[manuscript_id] = pd.DataFrame(columns=[
+                "template_id", "annotation", "annotation_Language",
+                "annotation_transliteration", "annotation_type", "other", "created_date"
+            ])
+
+        # Check if this exact template combination already exists
+        templates_data = saved_templates[manuscript_id]
+
+        if not templates_data.empty:
+            # Create a mask to find matching templates
+            match_conditions = []
+            for field in template_fields:
+                field_value = data.get(field, '').strip()
+                if field_value:
+                    match_conditions.append(templates_data[field].fillna('').astype(str).str.strip() == field_value)
+                else:
+                    match_conditions.append(templates_data[field].fillna('').astype(str).str.strip() == '')
+
+            # Combine all conditions with AND
+            if match_conditions:
+                combined_mask = match_conditions[0]
+                for condition in match_conditions[1:]:
+                    combined_mask = combined_mask & condition
+
+                # Check if any row matches all conditions
+                if combined_mask.any():
+                    return jsonify({"message": "Template already exists"}), 200
+
+        # Create new template entry
+        from datetime import datetime
+        template_data = {
+            'template_id': f"tmpl_{len(saved_templates[manuscript_id])}_{int(datetime.now().timestamp())}",
+            'annotation': data.get('annotation', '').strip(),
+            'annotation_Language': data.get('annotation_Language', '').strip(),
+            'annotation_transliteration': data.get('annotation_transliteration', '').strip(),
+            'annotation_type': data.get('annotation_type', '').strip(),
+            'other': data.get('other', '').strip(),
+            'created_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+        # Add template to saved_templates
+        df_template = pd.DataFrame([template_data])
+        saved_templates[manuscript_id] = pd.concat([saved_templates[manuscript_id], df_template], ignore_index=True)
+
+        # Save to separate Excel file for templates
+        template_file = os.path.join(resources_directory, f"{manuscript_id}_saved_templates.xlsx")
+        saved_templates[manuscript_id].to_excel(template_file, index=False)
+
+        return jsonify({"message": "Template saved successfully"}), 200
+
+    except Exception as e:
+        print(f"Error in save_template: {e}")
+        return jsonify({"error": "An error occurred while saving the template"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
