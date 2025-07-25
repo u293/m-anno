@@ -114,7 +114,7 @@
 
 .form-group label {
   display: block;
-  margin-bottom: 5px;
+  /*margin-bottom: 5px;*/
 }
 .manuscript-selection{
   padding-bottom: 0.5em;

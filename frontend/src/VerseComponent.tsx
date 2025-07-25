@@ -5,6 +5,17 @@ import PopupForm from "./PopupForm";
 import axios from "axios";
 import {ChevronLeft, ChevronRight} from "lucide-react";
 
+interface Template {
+    id: string;
+    annotation: string;
+    annotation_Language: string;
+    annotation_transliteration: string;
+    annotation_type: string;
+    other: string;
+    displayText: string;
+    template_name?: string;
+}
+
 const Button: React.FC<ButtonProps> = ({children, onClick, className = '', ariaLabel, variant, size}) => (
     <div
         style={{
@@ -36,26 +47,61 @@ const VerseComponent: React.FC<VerseProps> = ({
     const [textBetween, setTextBetween] = useState<string>(verse.aya_text);
     const [textAfter, setTextAfter] = useState<string>('');
     const [highlight, setHighlight] = useState<boolean>(false);
-    // const [selectedVerse, setSelectedVerse] = useState<Verse>(verse);
     const [selectedRange, setSelectedRange] = useState<string>('');
     const [annotationToUpdate, setAnnotationToUpdate] = useState<Annotation | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
     const [isPopupOpen, setIsPopupOpen] = useState(false);
     const [annotationResults, setAnnotationResults] = useState<AnnotationResult[]>([]);
+
+    // New state for template ID input
+    const [templateIdInput, setTemplateIdInput] = useState<string>('');
+    const [isWaitingForTemplateId, setIsWaitingForTemplateId] = useState<boolean>(false);
+
     const containerRef = useRef<HTMLDivElement>(null);
+    const preservedSelectionRef = useRef<{ text: string, range: string }>({text: '', range: ''});
 
     useEffect(() => {
-        // Only make the request if the name has changed from its initial value
-        // getAnnotations();
-        // if (selectedVerse !== verse) {
-        //     setSelectedVerse(verse)
         getAnnotations();
         setTextBefore("");
         setTextBetween(verse.aya_text);
         setTextAfter("");
-        // }
-    }, [verse, selectedManuscript]); // Dependencies array
+    }, [verse, selectedManuscript]);
 
+    // Add keyboard event listener
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            // Only handle keyboard input if the popup is NOT open
+            if (isPopupOpen) {
+                return; // Exit if the popup is open
+            }
+
+            if (isWaitingForTemplateId && selectedText) {
+                if (event.key === 'Enter') {
+                    handleTemplateIdSubmit();
+                } else if (event.key === 'Escape') {
+                    cancelTemplateIdInput();
+                } else if (event.key === 'Backspace') {
+                    setTemplateIdInput(prev => prev.slice(0, -1));
+                } else if (/^[0-9]$/.test(event.key)) {
+                    // Only allow numeric input
+                    setTemplateIdInput(prev => prev + event.key);
+                }
+                event.preventDefault();
+            } else if (selectedText && /^[0-9]$/.test(event.key)) {
+                // Start template ID input when user types a number and text is selected
+                if (selectedManuscript !== 'All Manuscripts') {
+                    setIsWaitingForTemplateId(true);
+                    setTemplateIdInput(event.key);
+                    event.preventDefault();
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isWaitingForTemplateId, selectedText, templateIdInput, selectedManuscript, isPopupOpen]); // Add isPopupOpen to the dependency array
 
     async function getAnnotations() {
         if (verse !== null) {
@@ -83,6 +129,52 @@ const VerseComponent: React.FC<VerseProps> = ({
         }
     }, []);
 
+    // Function to get template by ID
+    const getTemplateById = useCallback(async (templateId: string): Promise<Template | null> => {
+        try {
+            const response = await axios.get<Template>(`http://localhost:5000/get_template?id=${templateId}`);
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching template:', error);
+            return null;
+        }
+    }, []);
+
+    // Function to handle template ID submission
+    const handleTemplateIdSubmit = useCallback(async () => {
+        if (!templateIdInput.trim()) {
+            cancelTemplateIdInput();
+            return;
+        }
+
+        try {
+            const template = await getTemplateById(templateIdInput);
+            if (!template) {
+                alert(`Template with ID "${templateIdInput}" not found`);
+                cancelTemplateIdInput();
+                return;
+            }
+
+            // Save the template annotation
+            await handleAddAnnotationFromTemplate(template);
+
+            // Reset template input state
+            setIsWaitingForTemplateId(false);
+            setTemplateIdInput('');
+
+        } catch (error) {
+            console.error('Error processing template:', error);
+            alert('Error processing template: ' + error);
+            cancelTemplateIdInput();
+        }
+    }, [templateIdInput]);
+
+    // Function to cancel template ID input
+    const cancelTemplateIdInput = useCallback(() => {
+        setIsWaitingForTemplateId(false);
+        setTemplateIdInput('');
+    }, []);
+
     const openPopup = () => setIsPopupOpen(true);
     const closePopup = async (forceUpdateAnnotations: boolean) => {
         setIsPopupOpen(false);
@@ -90,11 +182,9 @@ const VerseComponent: React.FC<VerseProps> = ({
         if (forceUpdateAnnotations) {
             await getAnnotations()
         }
-
     };
 
     const handleTextSelect = (event: React.MouseEvent) => {
-        // if (event.target === containerRef.current) {
         if (!isPopupOpen) {
             const selection = window.getSelection();
             if (selection && selection.toString()) {
@@ -104,16 +194,26 @@ const VerseComponent: React.FC<VerseProps> = ({
                 preSelectionRange.setEnd(range.startContainer, range.startOffset);
 
                 const start = preSelectionRange.toString().length;
-                const end = start + selectedText.length;
+                const end = start + selection.toString().length;
 
-                setSelectedText(selection.toString());
-                setSelectedRange(start + " - " + end)
+                const selectedTextValue = selection.toString();
+                const selectedRangeValue = start + " - " + end;
+
+                setSelectedText(selectedTextValue);
+                setSelectedRange(selectedRangeValue);
+
+                // Preserve selection for template usage
+                preservedSelectionRef.current = {
+                    text: selectedTextValue,
+                    range: selectedRangeValue
+                };
             } else {
-                // setSelectedText('');
                 setContextMenu(null);
+                setSelectedText('');
+                setSelectedRange('');
+                cancelTemplateIdInput();
             }
         }
-        // }
     };
 
     const handleContextMenu = (event: React.MouseEvent) => {
@@ -132,14 +232,77 @@ const VerseComponent: React.FC<VerseProps> = ({
         setContextMenu(null);
     };
 
+    const handleAddAnnotationFromTemplate = useCallback(async (template: Template) => {
+        if (selectedManuscript === 'All Manuscripts') {
+            alert("Annotate mode does not work if no specific manuscript is selected!");
+            setContextMenu(null);
+            return;
+        }
+
+        try {
+            console.log('Template selected:', template);
+            console.log('Preserved selection at selection time:', preservedSelectionRef.current);
+
+            // Increment template popularity first
+            console.log('Incrementing popularity for template:', template.id);
+            await axios.post('http://localhost:5000/increment_template_popularity', {
+                template_id: template.id
+            });
+            console.log('Popularity incremented successfully');
+
+            // Create annotation object with template data using preserved selection
+            const annotationData = {
+                manuscript_id: selectedManuscript,
+                verse_id: verse.AyahKey,
+                annotated_object: preservedSelectionRef.current.text,
+                annotated_range: preservedSelectionRef.current.range,
+                annotation_id: '',
+                annotation: template.annotation,
+                annotation_Language: template.annotation_Language,
+                annotation_transliteration: template.annotation_transliteration,
+                annotation_type: template.annotation_type,
+                other: template.other,
+                flag: false
+            };
+
+            console.log('Saving annotation with data:', annotationData);
+
+            // Save annotation directly
+            const response = await axios.post('http://localhost:5000/save_annotation', annotationData);
+            console.log('Template annotation saved:', response.data);
+
+            // Refresh annotations to show the newly added one
+            await getAnnotations();
+
+            // Clear selection and close context menu
+            setSelectedText('');
+            setSelectedRange('');
+            setContextMenu(null);
+
+            // Clear text selection in the browser
+            if (window.getSelection) {
+                window.getSelection()?.removeAllRanges();
+            }
+
+            // Optional: Show success message
+            console.log(`Annotation from template "${template.template_name || template.displayText}" added successfully!`);
+
+        } catch (error) {
+            console.error('Error handling template annotation:', error);
+            alert('Error adding annotation from template: ' + error);
+        }
+    }, [selectedManuscript, verse.AyahKey]);
+
     const handleCloseContextMenu = () => {
         setContextMenu(null);
+        cancelTemplateIdInput();
     };
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
                 setContextMenu(null);
+                cancelTemplateIdInput();
             }
         };
 
@@ -158,14 +321,10 @@ const VerseComponent: React.FC<VerseProps> = ({
             } else {
                 alert("For some reason, it failed to delete")
             }
-            // setAnnotationResults(annotationResults.filter(item => item.a !== id));
-
         }
     };
 
     function handleUpdate(annotation: Annotation) {
-        // setSelectedText(annotation.annotated_object)
-        // setSelectedRange(annotation.annotated_range)
         setAnnotationToUpdate(annotation)
         openPopup()
     }
@@ -187,7 +346,6 @@ const VerseComponent: React.FC<VerseProps> = ({
         setTextBefore("");
         setTextBetween(verse.aya_text);
         setTextAfter("");
-
     }
 
     function onNextVerse() {
@@ -199,29 +357,6 @@ const VerseComponent: React.FC<VerseProps> = ({
     }
 
     return (<div>
-        {/*  <div className="alert alert-info" role="alert" ref={containerRef} onMouseUp={handleTextSelect}*/}
-        {/*       onContextMenu={handleContextMenu}>*/}
-        {/*      <PopupForm isOpen={isPopupOpen} onClose={closePopup} initialVerseId={verse.AyahKey}*/}
-        {/*                 initialAnnotatedObject={selectedText} initialSelectedRange={selectedRange}*/}
-        {/*                 selectedManuscript={selectedManuscript} annotationToUpdate={annotationToUpdate}/>*/}
-        {/*      <h4 lang="ar" className="alert-heading">{textBefore}<span*/}
-        {/*          style={{*/}
-        {/*              backgroundColor: highlight ? 'yellow' : 'transparent',*/}
-        {/*              borderRadius: '7px',*/}
-        {/*          }}*/}
-        {/*      >*/}
-        {/*  {textBetween}*/}
-        {/*</span>{textAfter}</h4>*/}
-        {/*      /!*<p>{selectedVerse.EnglishTranslation}</p>*!/*/}
-        {/*      {contextMenu && (*/}
-        {/*          <ContextMenu*/}
-        {/*              x={contextMenu.x}*/}
-        {/*              y={contextMenu.y}*/}
-        {/*              onClose={handleCloseContextMenu}*/}
-        {/*              onAddAnnotationClicked={handleAddAnnotationClicked}*/}
-        {/*          />*/}
-        {/*      )}*/}
-        {/*  </div>*/}
         <div style={{display: 'flex', alignItems: 'center', width: '100%', paddingBottom: '1rem'}}>
             <Button onClick={onPreviousVerse} ariaLabel="Previous verse">
                 <ChevronLeft className="h-4 w-4"/>
@@ -233,7 +368,7 @@ const VerseComponent: React.FC<VerseProps> = ({
                 ref={containerRef}
                 onMouseUp={handleTextSelect}
                 onContextMenu={handleContextMenu}
-                style={{flex: 1, margin: '0 10px', padding: '10px'}}
+                style={{flex: 1, margin: '0 10px', padding: '10px', position: 'relative'}}
             >
                 <PopupForm
                     isOpen={isPopupOpen}
@@ -244,11 +379,32 @@ const VerseComponent: React.FC<VerseProps> = ({
                     selectedManuscript={selectedManuscript}
                     annotationToUpdate={annotationToUpdate}
                 />
+
+                {/* Template ID Input Overlay */}
+                {isWaitingForTemplateId && (
+                    <div style={{
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        background: 'rgba(0, 0, 0, 0.8)',
+                        color: 'white',
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                        zIndex: 1000
+                    }}>
+                        Template ID: {templateIdInput}
+                        <div style={{fontSize: '12px', marginTop: '4px', opacity: 0.8}}>
+                            Press Enter to confirm, Esc to cancel
+                        </div>
+                    </div>
+                )}
+
                 <h4 lang="ar" className="alert-heading" style={{padding: '0.5rem'}}>
                     {textBefore}
                     <span
                         style={{
-                            backgroundColor: highlight ? 'yellow' : 'transparent',
+                            backgroundColor: highlight ? 'yellow' : (selectedText ? 'lightblue' : 'transparent'),
                             borderRadius: '7px',
                         }}
                     >
@@ -262,6 +418,11 @@ const VerseComponent: React.FC<VerseProps> = ({
                         y={contextMenu.y}
                         onClose={handleCloseContextMenu}
                         onAddAnnotationClicked={handleAddAnnotationClicked}
+                        onAddAnnotationFromTemplate={handleAddAnnotationFromTemplate}
+                        manuscriptId={selectedManuscript}
+                        verseId={verse.AyahKey}
+                        annotatedObject={selectedText}
+                        selectedRange={selectedRange}
                     />
                 )}
             </div>
@@ -270,6 +431,21 @@ const VerseComponent: React.FC<VerseProps> = ({
                 <ChevronRight className="h-4 w-4"/>
             </Button>
         </div>
+
+        {/* Instructions for users */}
+        {selectedText && !isWaitingForTemplateId && selectedManuscript !== 'All Manuscripts' && (
+            <div style={{
+                padding: '8px',
+                background: '#e7f3ff',
+                border: '1px solid #b3d7ff',
+                borderRadius: '4px',
+                marginBottom: '10px',
+                fontSize: '14px'
+            }}>
+                💡 Tip: Type a template ID (e.g., "12") to quickly apply a template to the selected text
+            </div>
+        )}
+
         <div className="accordion" id="resultsAccordion" style={{paddingBottom: '10rem'}}>
             {annotationResults.map((result) => {
                 return (<div key={result.manuscript_id} className="accordion-item">
@@ -299,34 +475,8 @@ const VerseComponent: React.FC<VerseProps> = ({
                                     {result.annotations.length > 0 ? (
                                         <div className="list-group">
                                             {result.annotations.map((annotation) => (
-                                                // <div
-                                                //     key={annotation.annotation_id}
-                                                //     className="list-group-item annotation-item"
-                                                //     onMouseEnter={() => highlightAnnotationOn(annotation)}
-                                                //     onMouseLeave={() => highlightAnnotationOff(annotation)}
-                                                // >
-                                                //     {annotation.flag && (
-                                                //         <span className="flag-indicator">&#128681;</span>
-                                                //     )}
-                                                //     <strong>Annotated
-                                                //         Object:</strong> {annotation.annotated_object}<br/>
-                                                //     <strong>Verse Key:</strong> {annotation.verse_id}<br/>
-                                                //     <strong>Annotation:</strong> {annotation.annotation}<br/>
-                                                //     <strong>Annotation Range:</strong> {annotation.annotated_range}<br/>
-                                                //     <strong>Annotation
-                                                //         Language:</strong> {annotation.annotation_Language}<br/>
-                                                //     <strong>Annotation Type:</strong> {annotation.annotation_type}<br/>
-                                                //     <strong>Annotation
-                                                //         Transliteration:</strong> {annotation.annotation_transliteration}<br/>
-                                                //     <strong>Other Notes:</strong> {annotation.other}<br/>
-                                                //     <button type="button" className="btn btn-primary"
-                                                //             onClick={() => handleUpdate(annotation)}>Update
-                                                //     </button>
-                                                //     <button type="button" className="btn btn-danger"
-                                                //             onClick={() => handleDelete(annotation.annotation_id, result.manuscript_id)}>Delete
-                                                //     </button>
-                                                // </div>
                                                 <div className="card mb-3"
+                                                     key={annotation.annotation_id}
                                                      onMouseEnter={() => highlightAnnotationOn(annotation)}
                                                      onMouseLeave={() => highlightAnnotationOff(annotation)}>
                                                     <div className="card-header position-relative"
@@ -406,7 +556,6 @@ const VerseComponent: React.FC<VerseProps> = ({
                                                         </div>
                                                     </div>
                                                 </div>
-
                                             ))}
                                         </div>
                                     ) : (

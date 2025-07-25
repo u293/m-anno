@@ -10,6 +10,7 @@ interface Template {
     annotation_type: string;
     other: string;
     displayText: string;
+    template_name?: string;
 }
 
 interface AutocompleteProps {
@@ -34,6 +35,7 @@ const DualAutocomplete: React.FC<AutocompleteProps> = ({
     const [highlightedSection, setHighlightedSection] = useState<'attribute' | 'template'>('attribute');
     const inputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -126,7 +128,17 @@ const DualAutocomplete: React.FC<AutocompleteProps> = ({
         setIsOpen(false);
     };
 
-    const selectTemplateSuggestion = (template: Template) => {
+    const selectTemplateSuggestion = async (template: Template) => {
+        try {
+            // Increment template popularity on the backend
+            await axios.post('http://localhost:5000/increment_template_popularity', {
+                template_id: template.id
+            });
+        } catch (error) {
+            console.error('Error incrementing template popularity:', error);
+            // Continue with template selection even if popularity update fails
+        }
+
         onTemplateSelect(template);
         setIsOpen(false);
     };
@@ -286,6 +298,54 @@ const PopupForm: React.FC<PopupFormProps> = ({
     const [languages, setLanguages] = useState<Array<string>>([]);
     const [annotationTypes, setAnnotationTypes] = useState<Array<string>>([]);
     const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+    const [templateName, setTemplateName] = useState('');
+    const [templateId, setTemplateId] = useState('');
+
+    // Function to generate default template name
+    const generateDefaultTemplateName = (annotation: Annotation) => {
+        const parts = [];
+        if (annotation.annotation) parts.push(annotation.annotation.replace(/\s+/g, ''));
+        if (annotation.annotation_Language) parts.push(annotation.annotation_Language);
+        if (annotation.annotation_transliteration) parts.push(annotation.annotation_transliteration.replace(/\s+/g, ''));
+        if (annotation.annotation_type) parts.push(annotation.annotation_type.replace(/\s+/g, ''));
+        if (annotation.other) parts.push(annotation.other.replace(/\s+/g, ''));
+
+        return parts.join('-').toLowerCase();
+    };
+
+    // Function to generate next available template ID
+    const generateNextTemplateId = async () => {
+        try {
+            const response = await axios.get<{ nextId: string }>('http://localhost:5000/get_next_template_id');
+            return response.data.nextId;
+        } catch (error) {
+            console.error('Error fetching next template ID:', error);
+            // Fallback to timestamp-based ID
+            return Date.now().toString();
+        }
+    };
+
+    useEffect(() => {
+        if (isOpen) {
+            setSaveAsTemplate(false); // Uncheck "Save as Template"
+            setTemplateId(''); // Clear the template ID
+            setTemplateName(''); // Clear the template name as well
+        }
+    }, [isOpen]); // Run this effect whenever the 'isOpen' prop changes
+
+
+    // Update template name and ID when annotation fields change or when saveAsTemplate is toggled
+    useEffect(() => {
+        if (saveAsTemplate) {
+            const defaultName = generateDefaultTemplateName(annotation);
+            setTemplateName(defaultName);
+
+            // Generate template ID if not already set
+            if (!templateId) {
+                generateNextTemplateId().then(nextId => setTemplateId(nextId));
+            }
+        }
+    }, [annotation.annotation, annotation.annotation_Language, annotation.annotation_transliteration, annotation.annotation_type, annotation.other, saveAsTemplate]);
 
     useEffect(() => {
         if (selectedManuscript !== "All Manuscripts") {
@@ -348,7 +408,9 @@ const PopupForm: React.FC<PopupFormProps> = ({
         }));
     };
 
-    const handleTemplateSelect = (template: Template) => {
+    const handleTemplateSelect = async (template: Template) => {
+        // The popularity increment is now handled in selectTemplateSuggestion
+        // This function just updates the form fields with the template data
         setAnnotation((prevAnnotation) => ({
             ...prevAnnotation,
             annotation: template.annotation,
@@ -362,12 +424,14 @@ const PopupForm: React.FC<PopupFormProps> = ({
     const saveTemplate = async () => {
         try {
             const templateData = {
+                id: templateId,
                 manuscript_id: annotation.manuscript_id,
                 annotation: annotation.annotation,
                 annotation_Language: annotation.annotation_Language,
                 annotation_transliteration: annotation.annotation_transliteration,
                 annotation_type: annotation.annotation_type,
-                other: annotation.other
+                other: annotation.other,
+                template_name: templateName
             };
             await axios.post('http://localhost:5000/save_template', templateData);
             alert('Template saved successfully!');
@@ -382,6 +446,14 @@ const PopupForm: React.FC<PopupFormProps> = ({
 
         try {
             if (saveAsTemplate) {
+                if (!templateId.trim()) {
+                    alert('Please enter a template ID');
+                    return;
+                }
+                if (!templateName.trim()) {
+                    alert('Please enter a template name');
+                    return;
+                }
                 await saveTemplate();
             }
 
@@ -628,7 +700,7 @@ const PopupForm: React.FC<PopupFormProps> = ({
                         borderRadius: '6px',
                         border: '1px solid #e9ecef'
                     }}>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
                             <input
                                 type="checkbox"
                                 className="form-check-input"
@@ -638,13 +710,46 @@ const PopupForm: React.FC<PopupFormProps> = ({
                                 style={{ marginRight: '8px' }}
                             />
                             <label className="form-check-label" htmlFor="saveAsTemplate" style={{ fontWeight: 'bold', color: '#555' }}>
-                                Save as template (saves annotation, language, transliteration, type, and other fields)
+                                Save as template
                             </label>
                         </div>
+
+                        {saveAsTemplate && (
+                            <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
+                                <input
+                                    type="text"
+                                    id="templateName"
+                                    value={templateName}
+                                    onChange={(e) => setTemplateName(e.target.value)}
+                                    placeholder="Enter template name..."
+                                    style={{
+                                        flex: 1,
+                                        padding: '8px 12px',
+                                        border: '1px solid #ddd',
+                                        borderRadius: '4px',
+                                        fontSize: '14px'
+                                    }}
+                                />
+                                <input
+                                    type="text"
+                                    id="templateId"
+                                    value={templateId}
+                                    onChange={(e) => setTemplateId(e.target.value)}
+                                    placeholder="Enter template Id..."
+                                    style={{
+                                        flex: 1,
+                                        padding: '8px 12px',
+                                        border: '1px solid #ddd',
+                                        borderRadius: '4px',
+                                        fontSize: '14px'
+                                    }}
+                                />
+                            </div>
+                        )}
                     </div>
 
                     {/* Buttons */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                    <div style={{display: 'flex', justifyContent: 'center', gap: '12px'}}>
                         <button
                             type="submit"
                             style={{
@@ -657,7 +762,7 @@ const PopupForm: React.FC<PopupFormProps> = ({
                                 cursor: 'pointer'
                             }}
                         >
-                            {annotationToUpdate === null ? 'Save New' : 'Update Existing'}
+                        {annotationToUpdate === null ? 'Save New' : 'Update Existing'}
                         </button>
                         <button
                             type="button"

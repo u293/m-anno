@@ -389,40 +389,85 @@ def filter_annotations():
 # Add these functions to your existing Flask server code
 
 # Global dictionary to store templates in memory
-saved_templates = {}
+saved_templates = pd.DataFrame()
 
 def load_saved_templates():
-    """Load all saved templates from Excel files into memory"""
+    """Load all saved templates from a single Excel file into memory"""
     global saved_templates
-    for manuscript_id in all_manuscripts:
-        template_file = os.path.join(resources_directory, f"{manuscript_id}_saved_templates.xlsx")
-        if os.path.exists(template_file):
-            try:
-                saved_templates[manuscript_id] = pd.read_excel(template_file, dtype={
-                    "template_id": str,
-                    "annotation": str,
-                    "annotation_Language": str,
-                    "annotation_transliteration": str,
-                    "annotation_type": str,
-                    "other": str,
-                    "created_date": str
-                })
-                saved_templates[manuscript_id] = saved_templates[manuscript_id].fillna('')
-            except Exception as e:
-                print(f"Error loading templates for {manuscript_id}: {e}")
-                saved_templates[manuscript_id] = pd.DataFrame(columns=[
-                    "template_id", "annotation", "annotation_Language",
-                    "annotation_transliteration", "annotation_type", "other", "created_date"
-                ])
-        else:
-            # Create empty template DataFrame
-            saved_templates[manuscript_id] = pd.DataFrame(columns=[
-                "template_id", "annotation", "annotation_Language",
-                "annotation_transliteration", "annotation_type", "other", "created_date"
+    template_file = os.path.join(resources_directory, "saved_templates.xlsx")
+    if os.path.exists(template_file):
+        try:
+            saved_templates = pd.read_excel(template_file, dtype={
+                "template_id": str,
+                "template_name": str,
+                "manuscript_id": str,
+                "annotation": str,
+                "annotation_Language": str,
+                "annotation_transliteration": str,
+                "annotation_type": str,
+                "other": str,
+                "created_date": str,
+                "popularity": int
+            })
+            saved_templates = saved_templates.fillna('')
+            # Ensure popularity column exists and has default values
+            if 'popularity' not in saved_templates.columns:
+                saved_templates['popularity'] = 1
+            else:
+                # Convert popularity to int and handle NaN values
+                saved_templates['popularity'] = saved_templates['popularity'].fillna(1).astype(int)
+        except Exception as e:
+            print(f"Error loading templates: {e}")
+            saved_templates = pd.DataFrame(columns=[
+                "template_id", "template_name", "manuscript_id", "annotation", "annotation_Language",
+                "annotation_transliteration", "annotation_type", "other", "created_date", "popularity"
             ])
+    else:
+        # Create empty template DataFrame
+        saved_templates = pd.DataFrame(columns=[
+            "template_id", "template_name", "manuscript_id", "annotation", "annotation_Language",
+            "annotation_transliteration", "annotation_type", "other", "created_date", "popularity"
+        ])
 
 # Load templates when server starts
 load_saved_templates()
+
+@app.route('/increment_template_popularity', methods=['POST'])
+def increment_template_popularity():
+    """Increment the popularity counter for a specific template"""
+    global saved_templates
+    try:
+        data = request.json
+        template_id = data.get('template_id', '').strip()
+
+        if not template_id:
+            return jsonify({"error": "Template ID is required"}), 400
+
+        # Find the template by ID
+        template_mask = saved_templates['template_id'] == template_id
+
+        if not template_mask.any():
+            return jsonify({"error": "Template not found"}), 404
+
+        # Increment popularity
+        saved_templates.loc[template_mask, 'popularity'] = saved_templates.loc[template_mask, 'popularity'] + 1
+
+        # Save the updated templates to Excel file
+        template_file = os.path.join(resources_directory, "saved_templates.xlsx")
+        saved_templates.to_excel(template_file, index=False)
+
+        # Get the updated popularity value for confirmation
+        updated_popularity = saved_templates.loc[template_mask, 'popularity'].iloc[0]
+
+        return jsonify({
+            "message": "Template popularity incremented successfully",
+            "template_id": template_id,
+            "new_popularity": int(updated_popularity)
+        }), 200
+
+    except Exception as e:
+        print(f"Error in increment_template_popularity: {e}")
+        return jsonify({"error": "An error occurred while incrementing template popularity"}), 500
 
 @app.route('/get_attribute_suggestions', methods=['GET'])
 def get_attribute_suggestions():
@@ -467,47 +512,112 @@ def get_attribute_suggestions():
         print(f"Error in get_attribute_suggestions: {e}")
         return jsonify([])
 
-
 @app.route('/get_template_suggestions', methods=['GET'])
 def get_template_suggestions():
     manuscript_id = request.args.get('manuscript', '')
     query = request.args.get('query', '')
-
-    if not manuscript_id or not query:
-        return jsonify([])
-
-    if manuscript_id not in saved_templates:
-        return jsonify([])
+    recent = request.args.get('recent', '')
 
     try:
         # Template fields
         template_fields = ['annotation', 'annotation_Language', 'annotation_transliteration', 'annotation_type', 'other']
 
-        # Get saved templates for the manuscript
-        templates_data = saved_templates[manuscript_id]
-
-        if templates_data.empty:
+        # Get all saved templates (global across all manuscripts)
+        if saved_templates.empty:
             return jsonify([])
 
-        # Create template suggestions
-        suggestions = []
-        for _, row in templates_data.iterrows():
-            # Create display text in format: "annotation-language-transliteration-type-other"
-            display_parts = []
-            for field in template_fields:
-                value = str(row[field]).strip() if pd.notna(row[field]) else ''
-                if value and value != 'nan':
-                    # Truncate long values for display
-                    if len(value) > 20:
-                        value = value[:17] + "..."
-                    display_parts.append(value)
+        # Handle recent parameter - when true, sort by popularity and ignore query
+        if recent.lower() == 'true':
+            # Sort by popularity column (highest first)
+            if 'popularity' not in saved_templates.columns:
+                print("Warning: 'popularity' column not found in saved_templates")
+                return jsonify([])
+
+            # Sort by popularity descending (highest popularity first)
+            sorted_templates = saved_templates.sort_values('popularity', ascending=False)
+
+            # Create suggestions from sorted templates
+            suggestions = []
+            for _, row in sorted_templates.iterrows():
+                # Use template_name if available, otherwise create display text from fields
+                if row.get('template_name') and str(row['template_name']).strip():
+                    display_text = str(row['template_name']).strip()
                 else:
-                    display_parts.append('')
+                    # Create display text in format: "annotation-language-transliteration-type-other"
+                    display_parts = []
+                    for field in template_fields:
+                        value = str(row[field]).strip() if pd.notna(row[field]) else ''
+                        if value and value != 'nan':
+                            # Truncate long values for display
+                            if len(value) > 20:
+                                value = value[:17] + "..."
+                            display_parts.append(value)
+                        else:
+                            display_parts.append('')
+                    display_text = '-'.join(filter(None, display_parts))  # Filter out empty parts
 
-            display_text = '-'.join(display_parts)
+                template = {
+                    'id': str(row.get('template_id', len(suggestions))),
+                    'annotation': str(row['annotation']) if pd.notna(row['annotation']) else '',
+                    'annotation_Language': str(row['annotation_Language']) if pd.notna(row['annotation_Language']) else '',
+                    'annotation_transliteration': str(row['annotation_transliteration']) if pd.notna(row['annotation_transliteration']) else '',
+                    'annotation_type': str(row['annotation_type']) if pd.notna(row['annotation_type']) else '',
+                    'other': str(row['other']) if pd.notna(row['other']) else '',
+                    'displayText': display_text,
+                    'popularity': int(row['popularity']) if pd.notna(row['popularity']) else 0
+                }
+                suggestions.append(template)
 
-            # Check if query matches any part of the display text (case-insensitive)
-            if query.lower() in display_text.lower():
+            # Remove duplicates based on the combination of all template fields
+            seen_combinations = set()
+            unique_suggestions = []
+            for suggestion in suggestions:
+                combination = (
+                    suggestion['annotation'],
+                    suggestion['annotation_Language'],
+                    suggestion['annotation_transliteration'],
+                    suggestion['annotation_type'],
+                    suggestion['other']
+                )
+                if combination not in seen_combinations:
+                    seen_combinations.add(combination)
+                    unique_suggestions.append(suggestion)
+
+            # Return top 10 most recent suggestions
+            return jsonify(unique_suggestions[:10])
+
+        # Original query-based logic when recent is not true
+        if not query:
+            return jsonify([])
+
+        # Create template suggestions based on query
+        suggestions = []
+        for _, row in saved_templates.iterrows():
+            # Use template_name if available, otherwise create display text from fields
+            if row.get('template_name') and str(row['template_name']).strip():
+                display_text = str(row['template_name']).strip()
+            else:
+                # Create display text in format: "annotation-language-transliteration-type-other"
+                display_parts = []
+                for field in template_fields:
+                    value = str(row[field]).strip() if pd.notna(row[field]) else ''
+                    if value and value != 'nan':
+                        # Truncate long values for display
+                        if len(value) > 20:
+                            value = value[:17] + "..."
+                        display_parts.append(value)
+                    else:
+                        display_parts.append('')
+                display_text = '-'.join(filter(None, display_parts))  # Filter out empty parts
+
+            # Check if query matches any part of the display text or template fields (case-insensitive)
+            searchable_text = display_text.lower()
+            field_text = ' '.join([
+                str(row[field]).lower() if pd.notna(row[field]) else ''
+                for field in template_fields
+            ])
+
+            if query.lower() in searchable_text or query.lower() in field_text:
                 template = {
                     'id': str(row.get('template_id', len(suggestions))),
                     'annotation': str(row['annotation']) if pd.notna(row['annotation']) else '',
@@ -522,7 +632,6 @@ def get_template_suggestions():
         # Remove duplicates based on the combination of all template fields
         seen_combinations = set()
         unique_suggestions = []
-
         for suggestion in suggestions:
             combination = (
                 suggestion['annotation'],
@@ -554,12 +663,14 @@ def get_template_suggestions():
         print(f"Error in get_template_suggestions: {e}")
         return jsonify([])
 
-
 @app.route('/save_template', methods=['POST'])
 def save_template():
+    global saved_templates
     try:
         data = request.json
         manuscript_id = data.get('manuscript_id', '')
+        template_name = data.get('template_name', '').strip()
+        template_id = data.get('id', '').strip()
 
         if not manuscript_id:
             return jsonify({"error": "Manuscript ID is required"}), 400
@@ -575,25 +686,16 @@ def save_template():
         if not has_content:
             return jsonify({"error": "Template must have at least one non-empty field"}), 400
 
-        # Initialize templates for manuscript if not exists
-        if manuscript_id not in saved_templates:
-            saved_templates[manuscript_id] = pd.DataFrame(columns=[
-                "template_id", "annotation", "annotation_Language",
-                "annotation_transliteration", "annotation_type", "other", "created_date"
-            ])
-
         # Check if this exact template combination already exists
-        templates_data = saved_templates[manuscript_id]
-
-        if not templates_data.empty:
+        if not saved_templates.empty:
             # Create a mask to find matching templates
             match_conditions = []
             for field in template_fields:
                 field_value = data.get(field, '').strip()
                 if field_value:
-                    match_conditions.append(templates_data[field].fillna('').astype(str).str.strip() == field_value)
+                    match_conditions.append(saved_templates[field].fillna('').astype(str).str.strip() == field_value)
                 else:
-                    match_conditions.append(templates_data[field].fillna('').astype(str).str.strip() == '')
+                    match_conditions.append(saved_templates[field].fillna('').astype(str).str.strip() == '')
 
             # Combine all conditions with AND
             if match_conditions:
@@ -608,28 +710,113 @@ def save_template():
         # Create new template entry
         from datetime import datetime
         template_data = {
-            'template_id': f"tmpl_{len(saved_templates[manuscript_id])}_{int(datetime.now().timestamp())}",
+            'template_id': template_id,
+            'template_name': template_name,
+            'manuscript_id': manuscript_id,
             'annotation': data.get('annotation', '').strip(),
             'annotation_Language': data.get('annotation_Language', '').strip(),
             'annotation_transliteration': data.get('annotation_transliteration', '').strip(),
             'annotation_type': data.get('annotation_type', '').strip(),
             'other': data.get('other', '').strip(),
-            'created_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'created_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'popularity': 1
         }
 
         # Add template to saved_templates
         df_template = pd.DataFrame([template_data])
-        saved_templates[manuscript_id] = pd.concat([saved_templates[manuscript_id], df_template], ignore_index=True)
+        saved_templates = pd.concat([saved_templates, df_template], ignore_index=True)
 
-        # Save to separate Excel file for templates
-        template_file = os.path.join(resources_directory, f"{manuscript_id}_saved_templates.xlsx")
-        saved_templates[manuscript_id].to_excel(template_file, index=False)
+        # Save to single Excel file for all templates
+        template_file = os.path.join(resources_directory, "saved_templates.xlsx")
+        saved_templates.to_excel(template_file, index=False)
 
         return jsonify({"message": "Template saved successfully"}), 200
 
     except Exception as e:
         print(f"Error in save_template: {e}")
         return jsonify({"error": "An error occurred while saving the template"}), 500
+
+@app.route('/get_next_template_id', methods=['GET'])
+def get_next_template_id():
+    global saved_templates
+    try:
+        if saved_templates.empty or 'template_id' not in saved_templates.columns:
+            next_id = 1
+        else:
+            # Extract numerical parts from existing template_ids
+            # Assuming template_ids are like "temp_1", "temp_2", or just "1", "2"
+            numeric_ids = []
+            for tid in saved_templates['template_id'].dropna().astype(str):
+                # Try to extract numbers, handling cases like "temp_123" or just "123"
+                try:
+                    # If it's purely numeric
+                    numeric_ids.append(int(tid))
+                except ValueError:
+                    # If it has a prefix like "temp_"
+                    if '_' in tid:
+                        try:
+                            numeric_ids.append(int(tid.split('_')[-1]))
+                        except ValueError:
+                            pass # Ignore if not a valid number after split
+
+            if numeric_ids:
+                next_id = max(numeric_ids) + 1
+            else:
+                next_id = 1
+
+        # You can format the ID as needed, e.g., "temp_1", "temp_2"
+        # For simplicity, returning just the number as a string for now,
+        # but you can add a prefix if your client expects it.
+        return jsonify({"nextId": str(next_id)}), 200
+
+    except Exception as e:
+        print(f"Error in get_next_template_id: {e}")
+        return jsonify({"error": "An error occurred while generating the next template ID"}), 500
+
+
+@app.route('/get_template', methods=['GET'])
+def get_template():
+    global saved_templates # Ensure access to the global DataFrame
+    template_id = request.args.get('id')
+
+    if not template_id:
+        return jsonify({"error": "Template ID is required"}), 400
+
+    try:
+        # Ensure 'template_id' column is treated as string for robust comparison
+        # And handle potential NaN values by converting to string first
+        template_row = saved_templates[saved_templates['template_id'].fillna('').astype(str) == template_id]
+
+        if not template_row.empty:
+            # Convert the found row to a dictionary and return.
+            # .iloc[0] gets the first (and should be only) matching row
+            # .to_dict() converts it to a dictionary
+            # orient='records' ensures it's a list of dictionaries if multiple rows matched,
+            # but with template_id as unique, it will be a list with one dict.
+            # We take the first element [0]
+            template_data = template_row.iloc[0].to_dict()
+
+            # Clean up the data for the frontend if necessary (e.g., remove popularity, created_date)
+            # Or send all, depending on what your frontend 'Template' interface expects.
+            # Let's match your frontend 'Template' interface.
+            response_data = {
+                "id": template_data.get('template_id', ''),
+                "annotation": template_data.get('annotation', ''),
+                "annotation_Language": template_data.get('annotation_Language', ''),
+                "annotation_transliteration": template_data.get('annotation_transliteration', ''),
+                "annotation_type": template_data.get('annotation_type', ''),
+                "other": template_data.get('other', ''),
+                "displayText": template_data.get('template_name', ''), # Assuming template_name can be used for displayText
+                "template_name": template_data.get('template_name', '')
+            }
+
+            return jsonify(response_data), 200
+        else:
+            return jsonify({"message": "Template not found"}), 404
+
+    except Exception as e:
+        print(f"Error in get_template: {e}")
+        return jsonify({"error": "An error occurred while fetching the template"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
