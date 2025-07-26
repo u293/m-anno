@@ -446,9 +446,9 @@ const ContextMenu: React.FC<EnhancedContextMenuProps> = ({
                                         {/*            {template.annotation.length > 50 ? '...' : ''}</span>*/}
                                         {/*    )}*/}
                                         {/*</div>*/}
-                                        {/*<div style={{fontSize: '10px', color: '#999', marginTop: '2px'}}>*/}
-                                        {/*    ID: {template.id}*/}
-                                        {/*</div>*/}
+                                        <div style={{fontSize: '11px', color: '#666', marginTop: '2px'}}>
+                                            ID: {template.id}
+                                        </div>
                                     </button>
                                 ))}
                             </>

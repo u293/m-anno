@@ -1,3 +1,5 @@
+import unicodedata
+
 from flask import Flask, request, jsonify
 import pandas as pd
 from flask_cors import CORS
@@ -17,6 +19,17 @@ CORS(app)
 #     b = re.sub(hamza_alef_pattern, 'ا', a)
 #     return b
 chars_to_normalize = set()
+
+def remove_diacritics(input_str):
+    """
+    Removes diacritical marks from a string.
+    """
+    if not isinstance(input_str, str):
+        return input_str
+    # Normalize to NFD (Canonical Decomposition) to separate base characters and diacritics
+    nfkd_form = unicodedata.normalize('NFD', input_str)
+    # Filter out characters that are combining characters (diacritics)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 
 def normalize_arabic_text(text):
@@ -818,5 +831,114 @@ def get_template():
         print(f"Error in get_template: {e}")
         return jsonify({"error": "An error occurred while fetching the template"}), 500
 
+
+@app.route('/get_similar_context_annotations', methods=['GET'])
+def get_similar_context_annotations():
+    """
+    Get all annotations for a similar context (manuscript_id, annotated_object)
+    with diacritics removed for matching.
+    Limits the number of returned items to 10.
+    """
+    manuscript_id = request.args.get('manuscript', '')
+    annotated_object_query = request.args.get('annotated_object', '')
+
+    # Validate required parameters
+    if not manuscript_id or not annotated_object_query:
+        return jsonify([])
+
+    # Check if manuscript exists
+    if manuscript_id not in annotations:
+        return jsonify([])
+
+    try:
+        manuscript_annotations = annotations[manuscript_id].copy() # Work on a copy to avoid SettingWithCopyWarning
+
+        # Normalize the query annotated_object
+        normalized_annotated_object_query = remove_diacritics(annotated_object_query).lower()
+
+        # Create a normalized version of the 'annotated_object' column for matching
+        manuscript_annotations['normalized_annotated_object'] = \
+            manuscript_annotations['annotated_object'].apply(remove_diacritics).str.lower()
+
+        # Filter annotations
+        context_mask = (
+                (manuscript_annotations['manuscript_id'] == manuscript_id) &
+                (manuscript_annotations['normalized_annotated_object'] == normalized_annotated_object_query)
+        )
+
+        matching_annotations = manuscript_annotations[context_mask]
+
+        # Sort by annotation_id for consistent ordering (most recent first if IDs are sequential)
+        # Handle potential non-numeric annotation_ids by converting to string for robust sorting
+        matching_annotations['sort_key'] = matching_annotations['annotation_id'].apply(
+            lambda x: int(x) if isinstance(x, (int, float)) and not pd.isna(x) else float('-inf')
+        )
+        matching_annotations = matching_annotations.sort_values(by='sort_key', ascending=False)
+        matching_annotations = matching_annotations.drop(columns=['sort_key'])
+
+
+        # Limit the number of items
+        limited_annotations = matching_annotations.head(10)
+
+        # Convert to list of dictionaries for JSON response and clean up
+        cleaned_result = []
+        for index, row in limited_annotations.iterrows():
+            cleaned_annotation = {}
+            for key, value in row.items():
+                if key == 'normalized_annotated_object':
+                    continue # Skip this temporary column
+
+                if pd.isna(value) or value == 'nan':
+                    cleaned_annotation[key] = ''
+                elif key == 'flag':
+                    cleaned_annotation[key] = bool(value) if value is not None else False
+                elif key == 'annotated_object':
+                    # Ensure diacritics are removed from the annotated_object in the output
+                    cleaned_annotation[key] = remove_diacritics(str(value)) if value is not None else ''
+                else:
+                    cleaned_annotation[key] = str(value) if value is not None else ''
+
+            cleaned_result.append(cleaned_annotation)
+
+        return jsonify(cleaned_result)
+
+    except Exception as e:
+        print(f"Error in get_similar_context_annotations: {e}")
+        return jsonify([])
+
+
+@app.route('/get_annotation_stats', methods=['GET'])
+def get_annotation_stats():
+    """Get statistics for each manuscript"""
+    stats = []
+    for manuscript_id, manuscript_annotations in annotations.items():
+        total = len(manuscript_annotations)
+        # Assuming recent means last 30 days - adjust logic as needed
+        flagged = len(manuscript_annotations[manuscript_annotations['flag'] == True])
+
+        stats.append({
+            'manuscript_id': manuscript_id,
+            'manuscript_name': manuscript_id,
+            'total_annotations': total,
+            'recent_annotations': min(total, 10),  # Placeholder logic
+            'flagged_annotations': flagged
+        })
+
+    return jsonify(stats)
+
+@app.route('/get_recent_annotations', methods=['GET'])
+def get_recent_annotations():
+    """Get recent annotations across all manuscripts"""
+    limit = request.args.get('limit', 50, type=int)
+    all_annotations = []
+
+    for manuscript_id, manuscript_annotations in annotations.items():
+        manuscript_data = manuscript_annotations.to_dict(orient='records')
+        all_annotations.extend(manuscript_data)
+
+    # Sort by annotation_id (assuming higher ID means more recent)
+    all_annotations.sort(key=lambda x: int(x.get('annotation_id', 0)), reverse=True)
+
+    return jsonify(all_annotations[:limit])
 if __name__ == '__main__':
     app.run(debug=True)

@@ -301,6 +301,11 @@ const PopupForm: React.FC<PopupFormProps> = ({
     const [templateName, setTemplateName] = useState('');
     const [templateId, setTemplateId] = useState('');
 
+    // New state for current annotations dropdown
+    const [similarAnnotations, setSimilarAnnotations] = useState<Annotation[]>([]);
+    const [showSimilarAnnotations, setShowSimilarAnnotations] = useState(false);
+    const similarAnnotationsRef = useRef<HTMLDivElement>(null);
+
     // Function to generate default template name
     const generateDefaultTemplateName = (annotation: Annotation) => {
         const parts = [];
@@ -325,14 +330,46 @@ const PopupForm: React.FC<PopupFormProps> = ({
         }
     };
 
+    // Function to fetch similar annotations for the same context
+    const fetchSimilarAnnotations = async () => {
+        try {
+            const response = await axios.get<Annotation[]>(
+                `http://localhost:5000/get_similar_context_annotations?manuscript=${annotation.manuscript_id}&annotated_object=${annotation.annotated_object}`
+            );
+            setSimilarAnnotations(response.data);
+        } catch (error) {
+            console.error('Error fetching similar annotations:', error);
+            setSimilarAnnotations([]);
+        }
+    };
+
+    // Handle click outside similar annotations dropdown
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (similarAnnotationsRef.current && !similarAnnotationsRef.current.contains(event.target as Node)) {
+                setShowSimilarAnnotations(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     useEffect(() => {
         if (isOpen) {
             setSaveAsTemplate(false); // Uncheck "Save as Template"
             setTemplateId(''); // Clear the template ID
             setTemplateName(''); // Clear the template name as well
+            setShowSimilarAnnotations(false); // Close similar annotations dropdown
+            fetchSimilarAnnotations(); // Fetch similar annotations
         }
     }, [isOpen]); // Run this effect whenever the 'isOpen' prop changes
 
+    // Fetch similar annotations when context changes
+    useEffect(() => {
+        if (isOpen && annotation.manuscript_id && annotation.verse_id && annotation.annotated_range) {
+            fetchSimilarAnnotations();
+        }
+    }, [annotation.manuscript_id, annotation.verse_id, annotation.annotated_range, isOpen]);
 
     // Update template name and ID when annotation fields change or when saveAsTemplate is toggled
     useEffect(() => {
@@ -419,6 +456,20 @@ const PopupForm: React.FC<PopupFormProps> = ({
             annotation_type: template.annotation_type,
             other: template.other,
         }));
+    };
+
+    // Handler for selecting an existing annotation
+    const handleSimilarAnnotationSelect = (selectedAnnotation: Annotation) => {
+        setAnnotation({
+            ...annotation, // Keep the context fields (manuscript_id, verse_id, annotated_object, annotated_range)
+            annotation: selectedAnnotation.annotation,
+            annotation_Language: selectedAnnotation.annotation_Language,
+            annotation_transliteration: selectedAnnotation.annotation_transliteration,
+            annotation_type: selectedAnnotation.annotation_type,
+            other: selectedAnnotation.other,
+            flag: selectedAnnotation.flag
+        });
+        setShowSimilarAnnotations(false);
     };
 
     const saveTemplate = async () => {
@@ -573,6 +624,106 @@ const PopupForm: React.FC<PopupFormProps> = ({
                 boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
             }}>
                 <h2 style={{ marginBottom: '24px', textAlign: 'center', color: '#333' }}>Annotation Form</h2>
+                {/* Similar Annotations Dropdown */}
+
+                {similarAnnotations && similarAnnotations.length > 1 ? (<div className="form-group" style={{
+                    marginBottom: '24px',
+                    padding: '16px',
+                    backgroundColor: '#f0f8ff',
+                    borderRadius: '6px',
+                    border: '1px solid #cce7ff'
+                }}>
+                    <div style={{position: 'relative'}} ref={similarAnnotationsRef}>
+                        <button
+                            type="button"
+                            onClick={() => setShowSimilarAnnotations(!showSimilarAnnotations)}
+                            style={{
+                                width: '100%',
+                                padding: '12px 16px',
+                                backgroundColor: '#007bff',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                            }}
+                        >
+                            <span>Similar Annotations for this Context ({similarAnnotations.length})</span>
+                            <span style={{
+                                transform: showSimilarAnnotations ? 'rotate(180deg)' : 'rotate(0deg)',
+                                transition: 'transform 0.2s'
+                            }}>
+                                    ▼
+                                </span>
+                        </button>
+
+                        {showSimilarAnnotations && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: 0,
+                                right: 0,
+                                backgroundColor: 'white',
+                                border: '1px solid #ccc',
+                                borderRadius: '4px',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                zIndex: 1000,
+                                maxHeight: '300px',
+                                overflowY: 'auto',
+                                marginTop: '4px'
+                            }}>
+                                {similarAnnotations.length === 0 ? (
+                                    <div style={{padding: '16px', textAlign: 'center', color: '#666'}}>
+                                        No existing annotations for this context
+                                    </div>
+                                ) : (
+                                    similarAnnotations.map((similarAnnotation, index) => (
+                                        <div
+                                            key={`similar-${similarAnnotation.annotation_id || index}`}
+                                            style={{
+                                                padding: '12px 16px',
+                                                cursor: 'pointer',
+                                                borderBottom: '1px solid #f0f0f0',
+                                                backgroundColor: 'white'
+                                            }}
+                                            onClick={() => handleSimilarAnnotationSelect(similarAnnotation)}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.backgroundColor = '#f8f9fa';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.backgroundColor = 'white';
+                                            }}
+                                        >
+                                            <div style={{fontWeight: 'bold', marginBottom: '4px', fontSize: '14px'}}>
+                                                {similarAnnotation.annotation || 'No annotation'}
+                                            </div>
+                                            <div style={{fontSize: '12px', color: '#666', marginBottom: '2px'}}>
+                                                <strong>Language:</strong> {similarAnnotation.annotation_Language || 'N/A'}
+                                                {similarAnnotation.annotation_transliteration && (
+                                                    <span> | <strong>Transliteration:</strong> {similarAnnotation.annotation_transliteration}</span>
+                                                )}
+                                            </div>
+                                            <div style={{fontSize: '12px', color: '#666'}}>
+                                                <strong>Type:</strong> {similarAnnotation.annotation_type || 'N/A'}
+                                                {similarAnnotation.other && (
+                                                    <span> | <strong>Other:</strong> {similarAnnotation.other}</span>
+                                                )}
+                                                {similarAnnotation.flag && (
+                                                    <span
+                                                        style={{color: '#dc3545', fontWeight: 'bold'}}> | FLAGGED</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>): ''}
+
                 <form onSubmit={handleSubmit}>
                     <div style={{ display: 'grid', gridTemplateColumns: '35% 65%', gap: '4px', marginBottom: '20px' }}>
                         {/* Left Column - First 4 attributes */}
@@ -762,7 +913,7 @@ const PopupForm: React.FC<PopupFormProps> = ({
                                 cursor: 'pointer'
                             }}
                         >
-                        {annotationToUpdate === null ? 'Save New' : 'Update Existing'}
+                            {annotationToUpdate === null ? 'Save New' : 'Update Existing'}
                         </button>
                         <button
                             type="button"
