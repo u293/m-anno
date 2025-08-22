@@ -182,32 +182,32 @@ const ContextMenu: React.FC<EnhancedContextMenuProps> = ({
 
         try {
             // Increment template popularity first
-            console.log('Incrementing popularity for template:', template.id);
-            await axios.post('http://localhost:5000/increment_template_popularity', {
-                template_id: template.id
-            });
-            console.log('Popularity incremented successfully');
+            // console.log('Incrementing popularity for template:', template.id);
+            // await axios.post('http://localhost:5000/increment_template_popularity', {
+            //     template_id: template.id
+            // });
+            // console.log('Popularity incremented successfully');
 
             // Create annotation object with template data using preserved selection
-            const annotationData = {
-                manuscript_id: manuscriptId,
-                verse_id: verseId,
-                annotated_object: preservedSelectionRef.current.text,
-                annotated_range: preservedSelectionRef.current.range,
-                annotation_id: '',
-                annotation: template.annotation,
-                annotation_Language: template.annotation_Language,
-                annotation_transliteration: template.annotation_transliteration,
-                annotation_type: template.annotation_type,
-                other: template.other,
-                flag: false
-            };
+            // const annotationData = {
+            //     manuscript_id: manuscriptId,
+            //     verse_id: verseId,
+            //     annotated_object: preservedSelectionRef.current.text,
+            //     annotated_range: preservedSelectionRef.current.range,
+            //     annotation_id: '',
+            //     annotation: template.annotation,
+            //     annotation_Language: template.annotation_Language,
+            //     annotation_transliteration: template.annotation_transliteration,
+            //     annotation_type: template.annotation_type,
+            //     other: template.other,
+            //     flag: false
+            // };
 
-            console.log('Saving annotation with data:', annotationData);
+            // console.log('Saving annotation with data:', annotationData);
 
             // Save annotation directly
-            const response = await axios.post('http://localhost:5000/save_annotation', annotationData);
-            console.log('Template annotation saved:', response.data);
+            // const response = await axios.post('http://localhost:5000/save_annotation', annotationData);
+            // console.log('Template annotation saved:', response.data);
 
             // Call the callback to notify parent component
             onAddAnnotationFromTemplate(template);
